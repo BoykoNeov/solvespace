@@ -15,9 +15,11 @@ namespace SolveSpace {
 // and convergence should be fast by now.
 #define RATPOLY_EPS (LENGTH_EPS/(1e2))
 
-// Two straight segments count as parallel when the sine of the angle between
-// them falls below this. That is the same angle that the 1 - cos(angle) test
-// this replaces accepted at 10*RATPOLY_EPS, but written linearly in the angle.
+// Two directions count as parallel when the sine of the angle between them
+// falls below this, whether they are the directions of two straight segments
+// or the tangents of two curves at a point. That is the same angle that the
+// 1 - cos(angle) test this replaces accepted at 10*RATPOLY_EPS, but written
+// linearly in the angle.
 #define PARALLEL_EPS (4.5e-4)
 
 static inline double Bernstein(int k, int deg, double t) {
@@ -134,7 +136,35 @@ bool SBezier::PointOnNonparallelCurve(const SBezier *curve, Vector *p) const {
             return false;
         }
     }
-    return PointOnThisAndCurve(curve, p);
+    if(!PointOnThisAndCurve(curve, p)) {
+        return false;
+    }
+
+    // The test above is global; it rejects a pair of curves that run along
+    // each other for their whole length. The same degeneracy arises at a
+    // single point, where two genuinely curved edges touch tangentially, and
+    // it is just as fatal there. PointOnThisAndCurve() stops as soon as its
+    // two points agree to within RATPOLY_EPS, and along a tangency that is
+    // already true of the seed it starts from, so it converges immediately and
+    // returns that seed. The seed is wherever our caller's subdivision
+    // happened to stop, not a feature of either curve; it typically lands a
+    // micron or two from a vertex that already exists, which is close enough
+    // to be mistaken for that vertex and far enough not to weld to it. So
+    // require that the curves really do cross at the point we found.
+    //
+    // The parameters are recomputed from that point rather than threaded out
+    // of PointOnThisAndCurve(), so that this measures the tangents where the
+    // answer is, and so that this stays a test on the result and not on the
+    // path the iteration took to reach it.
+    double ta, tb;
+    this->ClosestPointTo(*p, &ta, /*mustConverge=*/false);
+    curve->ClosestPointTo(*p, &tb, /*mustConverge=*/false);
+    Vector da = this->TangentAt(ta).WithMagnitude(1),
+           db = curve->TangentAt(tb).WithMagnitude(1);
+    if(da.Cross(db).Magnitude() < PARALLEL_EPS) {
+        return false;
+    }
+    return true;
 }
 
 bool SBezier::PointOnThisAndCurve(const SBezier *sbb, Vector *p) const {
