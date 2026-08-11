@@ -15,6 +15,11 @@ namespace SolveSpace {
 // and convergence should be fast by now.
 #define RATPOLY_EPS (LENGTH_EPS/(1e2))
 
+// Two straight segments count as parallel when the sine of the angle between
+// them falls below this. That is the same angle that the 1 - cos(angle) test
+// this replaces accepted at 10*RATPOLY_EPS, but written linearly in the angle.
+#define PARALLEL_EPS (4.5e-4)
+
 static inline double Bernstein(int k, int deg, double t) {
 // indexed by [degree][k][exponent]
     static const double bernstein_coeff[4][4][4] = {
@@ -108,10 +113,24 @@ void SBezier::ClosestPointTo(Vector p, double *t, bool mustConverge) const {
 }
 
 bool SBezier::PointOnNonparallelCurve(const SBezier *curve, Vector *p) const {
-    if(deg + curve->deg == 2) {  // check for parallel lines
-        Vector d1 = ctrl[1].Minus(ctrl[0]).WithMagnitude(1.0);
-        Vector d2 = curve->ctrl[1].Minus(curve->ctrl[0]).WithMagnitude(1.0);
-        if(fabs(1.0 - d1.Dot(d2)) < 10*RATPOLY_EPS) {
+    // Two straight segments running along the same line have no single
+    // intersection point to find: either they miss each other entirely, or
+    // they are coincident and the iteration below reports whichever point it
+    // happened to start from. Reject that pair. Note that being straight is a
+    // property of the control points, not of the degree; a Bezier whose
+    // control points are collinear is a line whatever its degree, and the
+    // edges that EdgeCurveIntersection() hands us carry whatever degree the
+    // surface has in that direction, not the degree their shape deserves.
+    Vector d1, d2;
+    if(IsLine(&d1) && curve->IsLine(&d2)) {
+        // The magnitude of the cross product of two unit vectors is the sine
+        // of the angle between them. That is zero for parallel and for
+        // antiparallel alike, so the direction the edge happens to run in
+        // doesn't matter, and it is linear in the angle near zero, unlike
+        // 1 - d1.Dot(d2), which is quadratic there and so rejects a cone the
+        // square root of the tolerance wide. It is also the quantity that
+        // matters: Vector::ClosestPointBetweenLines() divides by its square.
+        if(d1.Cross(d2).Magnitude() < PARALLEL_EPS) {
             return false;
         }
     }
